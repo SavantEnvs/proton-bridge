@@ -1,0 +1,64 @@
+// mayhem/harness_parser.go.src — native testing.F harness for proton-bridge's
+// message/MIME/RFC822 parser (pkg/message/parser). This is the byte-eating
+// surface: raw wire bytes → full MIME tree parse via parser.New, which drives
+// go-message's RFC822 reader plus proton's own multipart/charset/media-type
+// handling (pkg/mime, gluon rfc822/rfc5322).
+//
+// Staged by mayhem/build.sh into a fresh, single-package directory
+// (_mayhem_harness/parser) that also holds a copy of pkg/message/parser's
+// non-test sources, so go-118-fuzz-build can build it WITHOUT the upstream
+// package dir's *_test.go files (which pull in os/filepath fixtures and
+// testify — not needed for the fuzz surface). Declared `package parser` (the
+// directory's internal package) — go-118-fuzz-build rewrites this into an
+// ordinary non-test .go file, so an external *_test package would collide with
+// the copied `package parser` sources.
+//
+// Byte-in, NO file I/O (netnew §3): the fuzzer's bytes are parsed straight from
+// an in-memory reader; starter seeds are Mayhem's job via the Mayhemfile
+// testsuite: directive. This mirrors upstream parser_test.go's FuzzNewParser,
+// minus its os.ReadFile seed plumbing.
+package parser
+
+import (
+	"bytes"
+	"testing"
+)
+
+// FuzzNewParser drives parser.New (the full MIME/RFC822 decode) on arbitrary
+// bytes. On a successfully parsed message it also walks the tree and touches
+// each part's ContentType/ContentDisposition to exercise the media-type and
+// charset paths.
+func FuzzNewParser(f *testing.F) {
+	// A minimal well-formed RFC822 text/plain message.
+	f.Add([]byte("From: a@example.com\r\n" +
+		"To: b@example.com\r\n" +
+		"Subject: seed\r\n" +
+		"Content-Type: text/plain; charset=utf-8\r\n" +
+		"\r\n" +
+		"hello\r\n"))
+
+	f.Fuzz(func(_ *testing.T, data []byte) {
+		p, err := New(bytes.NewReader(data))
+		if err != nil || p == nil {
+			return
+		}
+		// Exercise the tree walk + media-type/disposition parsing on every part.
+		for _, part := range collect(p.Root()) {
+			_, _, _ = part.ContentType()
+			_, _, _ = part.ContentDisposition()
+			_ = part.HasContentID()
+		}
+	})
+}
+
+// collect flattens the part tree (harness-local helper; not an upstream API).
+func collect(root *Part) []*Part {
+	if root == nil {
+		return nil
+	}
+	out := []*Part{root}
+	for _, c := range root.Children() {
+		out = append(out, collect(c)...)
+	}
+	return out
+}
