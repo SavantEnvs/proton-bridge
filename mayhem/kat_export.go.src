@@ -1,0 +1,50 @@
+// mayhem/kat_export.go.src — a known-answer parse through proton-bridge's real
+// message/MIME/RFC822 parser (pkg/message/parser), exported so the
+// dynamically-linked KAT probe (mayhem/kat) can assert exact parsed values.
+// Staged by mayhem/build.sh into _mayhem_harness/parser alongside the copied
+// `package parser` sources, so it reaches the same New/Root/ContentType decode
+// path the fuzz harness exercises.
+//
+// This is the BEHAVIORAL oracle's engine: it parses a fixed RFC822 message and
+// returns decoded header/body fields. test.sh asserts these exact values; when
+// the program is neutered (LD_PRELOAD _exit(0)), the probe prints nothing and
+// the assertions fail — which is the point (§6.3).
+package parser
+
+import (
+	"bytes"
+	"fmt"
+	"strings"
+)
+
+// katMessage is a fixed, well-formed RFC822 text/plain message.
+const katMessage = "From: alice@example.com\r\n" +
+	"To: bob@example.com\r\n" +
+	"Subject: KAT Subject\r\n" +
+	"Content-Type: text/plain; charset=utf-8\r\n" +
+	"\r\n" +
+	"Hello KAT body\r\n"
+
+// KATParse parses katMessage through parser.New and returns:
+//
+//	ctype   — the root part's parsed media type ("text/plain")
+//	charset — the root part's parsed charset parameter ("utf-8")
+//	subject — the decoded Subject header ("KAT Subject")
+//	body    — the decoded body, trimmed ("Hello KAT body")
+func KATParse() (ctype, charset, subject, body string, err error) {
+	p, e := New(bytes.NewReader([]byte(katMessage)))
+	if e != nil {
+		return "", "", "", "", fmt.Errorf("parse: %w", e)
+	}
+	root := p.Root()
+	if root == nil {
+		return "", "", "", "", fmt.Errorf("nil root")
+	}
+
+	t, params, e := root.ContentType()
+	if e != nil {
+		return "", "", "", "", fmt.Errorf("content-type: %w", e)
+	}
+
+	return t, params["charset"], root.Header.Get("Subject"), strings.TrimSpace(string(root.Body)), nil
+}
