@@ -1,0 +1,9 @@
+# seed-from: https://app.mayhem.security/savantenvs/proton-bridge/fuzz-parser
+project: savantenvs/proton-bridge
+target: fuzz_parser-mined-0e7e132
+testsuite:
+  - https://$MAYHEM_DOMAIN/$MAYHEM_PROJECT/$MAYHEM_TARGET/testsuite.tar
+  - file://mayhem/fuzz_parser-mined-0e7e132/testsuite
+cmds:
+  - cmd: /mayhem/fuzz_parser
+    libfuzzer: true
