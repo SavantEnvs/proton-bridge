@@ -1,0 +1,45 @@
+// mayhem/harness_parser.go.src — native testing.F harness for proton-bridge's
+// message/MIME/RFC822 parser (pkg/message/parser). This is the byte-eating
+// surface: raw wire bytes → full MIME tree parse via parser.New, which drives
+// go-message's RFC822 reader plus proton's own multipart/charset/media-type
+// handling (pkg/mime, gluon rfc822/rfc5322).
+//
+// Staged by mayhem/build.sh into a fresh, single-package directory
+// (_mayhem_harness/parser) that also holds a copy of pkg/message/parser's
+// non-test sources, so go-118-fuzz-build can build it WITHOUT the upstream
+// package dir's *_test.go files (which pull in os/filepath fixtures and
+// testify — not needed for the fuzz surface). Declared `package parser
+
+import (
+	"testing"
+)
+
+// FuzzNewParser drives parser.New (the full MIME/RFC822 decode) on arbitrary
+// bytes, then walks the tree: every part's media type and disposition are read,
+// and every text/* part is converted to UTF-8 (the charset path).
+func FuzzNewParser(f *testing.F) {
+	// A minimal well-formed RFC822 text/plain message.
+	f.Add([]byte("From: a@example.com\r\n" +
+		"To: b@example.com\r\n" +
+		"Subject: seed\r\n" +
+		"Content-Type: text/plain; charset=utf-8\r\n" +
+		"\r\n" +
+		"hello\r\n"))
+
+	f.Fuzz(func(_ *testing.T, data []byte) {
+		p, err := New(data)
+		if err != nil || p == nil {
+			return
+		}
+		_ = p.NewWalker().
+			RegisterContentTypeHandler("text/.*", func(part *Part) error {
+				return part.ConvertToUTF8()
+			}).
+			RegisterDefaultHandler(func(part *Part) error {
+				_, _, _ = part.Header.ContentType()
+				_, _, _ = part.Header.ContentDisposition()
+				return nil
+			}).
+			Walk()
+	})
+}
